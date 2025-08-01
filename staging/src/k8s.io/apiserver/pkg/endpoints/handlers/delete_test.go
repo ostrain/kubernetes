@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	jsonserializer "k8s.io/apimachinery/pkg/runtime/serializer/json"
 	"k8s.io/apiserver/pkg/admission"
 	auditinternal "k8s.io/apiserver/pkg/apis/audit"
 	"k8s.io/apiserver/pkg/audit"
@@ -216,6 +217,38 @@ func TestDeleteCollection(t *testing.T) {
 	}
 }
 
+func TestDeleteCollectionDeleteOptions(t *testing.T) {
+	ctx := t.Context()
+	fakeDeleterFn := func(ctx context.Context, _ rest.ValidateObjectFunc, _ *metav1.DeleteOptions, _ *metainternalversion.ListOptions) (runtime.Object, error) {
+		return nil, nil
+	}
+
+	js := jsonserializer.NewSerializerWithOptions(jsonserializer.DefaultMetaFactory, nil, nil, jsonserializer.SerializerOptions{})
+	scope := &RequestScope{
+		Namer: &mockNamer{},
+		Serializer: &fakeSerializer{
+			serializer: runtime.NewCodec(js, js),
+		},
+	}
+	handler := DeleteCollection(fakeCollectionDeleterFunc(fakeDeleterFn), true, scope, nil)
+
+	body := "{}"
+	req, err := http.NewRequestWithContext(ctx, request.MethodDelete, "/api/v1/namespaces/default/pods/testpod", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "*/*")
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	gotCode := recorder.Code
+	wantCode := 400
+	if gotCode != wantCode {
+		t.Fatalf("expect %v but got %v: %+v", wantCode, gotCode, recorder)
+	}
+}
+
 func TestDeleteCollectionWithNoContextDeadlineEnforced(t *testing.T) {
 	ctx := t.Context()
 	var invokedGot, hasDeadlineGot int32
@@ -239,7 +272,7 @@ func TestDeleteCollectionWithNoContextDeadlineEnforced(t *testing.T) {
 	}
 	handler := DeleteCollection(fakeCollectionDeleterFunc(fakeDeleterFn), false, scope, nil)
 
-	request, err := http.NewRequestWithContext(ctx, request.MethodGet, "/test", nil)
+	request, err := http.NewRequestWithContext(ctx, request.MethodGet, "/apis/", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -478,6 +511,22 @@ func TestAuthorizeUnsafeDelete(t *testing.T) {
 		})
 	}
 }
+
+/*
+func TestDeleteResourceDeleteOptions(t *testing.T) {
+  tests := []struct {
+
+	}{
+
+	}
+}
+
+type fakeDeleterFunc func(ctx context.Context, deleteValidation rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error)
+
+func (f fakeDeleterFunc) Delete(ctx context.Context, name string, deleteValidation rest.ValidateObjectFunc, options *metav1.DeleteOptions) (runtime.Object, bool, error) {
+	return f(ctx, deleteValidation, options)
+}
+*/
 
 // attributes of interest for this test
 type attributes struct {
